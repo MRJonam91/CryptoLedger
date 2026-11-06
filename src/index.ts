@@ -3,6 +3,7 @@
 
 export * from './core/constants.ts';
 export * from './core/types.ts';
+export * from './core/math.ts';
 export * from './core/csv.ts';
 export * from './core/reconciler.ts';
 export * from './core/reporter.ts';

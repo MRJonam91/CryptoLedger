@@ -1,0 +1,4 @@
+Timestamp,Transaction Type,Asset,Quantity Transacted,Spot Price at Transaction,Subtotal,Total (inclusive of fees),Fees,Notes
+2026-01-05T08:30:00Z,Buy,BTC,0.15000000,42000.00,6300.00,6315.00,15.00,Bought BTC on Coinbase
+2026-01-25T11:00:00Z,Convert,BTC,0.05000000,45000.00,2250.00,2250.00,0.00,Converted to ETH
+2026-02-10T16:45:00Z,Send,BTC,0.08000000,48000.00,3840.00,3842.00,2.00,Withdrawal to external custody

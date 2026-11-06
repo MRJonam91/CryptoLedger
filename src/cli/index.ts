@@ -14,15 +14,24 @@ const SPONSOR_LINE = '💡 Support open source crypto tooling: github.com/sponso
 
 function printHelp(): void {
   console.log(`
-CryptoLedger — Local-first cryptocurrency movements reconciler
+CryptoLedger — Local-first cryptocurrency movements reconciler (Alpha v0.2.0)
 
 USAGE:
   cryptoledger <file1.csv> <file2.csv> [options]
   npx cryptoledger data/samples/exchange_alpha.csv data/samples/wallet_ledger.csv
 
-OPTIONS:
+FILTERING & VALUATION OPTIONS:
+  --asset <symbol>    Filter movements for a specific asset (e.g. BTC, ETH)
+  --account <name>    Filter movements involving a specific account/wallet
+  --since <date>      Include events on or after YYYY-MM-DD
+  --until <date>      Include events on or before YYYY-MM-DD
+  --method <method>   Inventory lot method: fifo or lifo (default: fifo)
+
+MATCHING OPTIONS:
   --window <min>      Reconciliation time window in minutes (default: 180)
   --tolerance <pct>   Network fee matching tolerance ratio (default: 0.05)
+
+OUTPUT OPTIONS:
   --json              Output raw JSON report (machine-readable)
   --markdown          Output Markdown table report
   --output <file>     Write report to file instead of stdout
@@ -44,7 +53,7 @@ async function main(): Promise<void> {
   }
 
   if (args.includes('-v') || args.includes('--version')) {
-    console.log('cryptoledger v0.1.0');
+    console.log('cryptoledger v0.2.0-alpha');
     return;
   }
 
@@ -54,6 +63,11 @@ async function main(): Promise<void> {
   let isJson = false;
   let isMarkdown = false;
   let outputPath: string | null = null;
+  let assetFilter: string | undefined = undefined;
+  let accountFilter: string | undefined = undefined;
+  let sinceDate: Date | undefined = undefined;
+  let untilDate: Date | undefined = undefined;
+  let inventoryMethod: 'FIFO' | 'LIFO' = 'FIFO';
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -66,6 +80,17 @@ async function main(): Promise<void> {
       timeWindowMinutes = parseInt(args[++i] || '180', 10);
     } else if (arg === '--tolerance' && args[i + 1]) {
       feeToleranceRatio = parseFloat(args[++i] || '0.05');
+    } else if (arg === '--asset' && args[i + 1]) {
+      assetFilter = args[++i];
+    } else if (arg === '--account' && args[i + 1]) {
+      accountFilter = args[++i];
+    } else if (arg === '--since' && args[i + 1]) {
+      sinceDate = new Date(args[++i] || '');
+    } else if (arg === '--until' && args[i + 1]) {
+      untilDate = new Date(args[++i] || '');
+    } else if (arg === '--method' && args[i + 1]) {
+      const m = (args[++i] || '').toUpperCase();
+      if (m === 'LIFO') inventoryMethod = 'LIFO';
     } else if (arg === '--output' && args[i + 1]) {
       outputPath = args[++i] || null;
     } else if (!arg.startsWith('-')) {
@@ -98,7 +123,12 @@ async function main(): Promise<void> {
 
   const engine = new ReconciliationEngine({
     timeWindowMinutes,
-    feeToleranceRatio
+    feeToleranceRatio,
+    assetFilter,
+    accountFilter,
+    since: sinceDate,
+    until: untilDate,
+    inventoryMethod
   });
 
   const report = engine.reconcile(allTransactions, processedFiles);
@@ -124,7 +154,6 @@ async function main(): Promise<void> {
   const isCI = process.env.CI || process.env.CONTINUOUS_INTEGRATION;
   const noSponsor = process.env.NO_SPONSOR === '1';
   if (!isJson && !isCI && !noSponsor && process.stdout.isTTY) {
-    // 1 in 3 runs on CLI interactive or always subtle
     console.log(`\n${SPONSOR_LINE}\n`);
   }
 }

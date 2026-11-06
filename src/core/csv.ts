@@ -2,14 +2,17 @@
 // Copyright (c) 2026 Manoj Rollo <fbxmano@gmail.com> (https://github.com/MRJonam91)
 
 import type { RawTransaction, RawTransactionType } from './types.ts';
+import { parseCryptoNumber } from './math.ts';
+
+export type DetectedFormat = 'binance' | 'kraken' | 'coinbase' | 'bitstamp' | 'ledger_wallet' | 'generic';
 
 export interface CsvParseResult {
-  detectedFormat: 'binance' | 'kraken' | 'ledger_wallet' | 'generic';
+  detectedFormat: DetectedFormat;
   transactions: RawTransaction[];
 }
 
 /**
- * Robust zero-dependency CSV line parser that handles quotes and delimiters.
+ * Robust zero-dependency CSV line parser handling quotes, escaped quotes, and delimiters.
  */
 export function parseCsvRows(content: string): string[][] {
   const lines = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
@@ -58,12 +61,16 @@ export function parseCsvToTransactions(csvContent: string, defaultAccountName = 
   const dataRows = rows.slice(1);
 
   // Detect format
-  let format: 'binance' | 'kraken' | 'ledger_wallet' | 'generic' = 'generic';
+  let format: DetectedFormat = 'generic';
   if (headers.includes('operation') && headers.includes('coin') && headers.includes('change')) {
     format = 'binance';
   } else if (headers.includes('txid') && headers.includes('time') && headers.includes('balance')) {
     format = 'kraken';
-  } else if (headers.includes('txhash') && headers.includes('from') && headers.includes('to')) {
+  } else if (headers.includes('transactiontype') || (headers.includes('quantitytransacted') && headers.includes('asset'))) {
+    format = 'coinbase';
+  } else if (headers.includes('datetime') && headers.includes('rate') && headers.includes('value')) {
+    format = 'bitstamp';
+  } else if (headers.includes('txhash') && (headers.includes('from') || headers.includes('to'))) {
     format = 'ledger_wallet';
   }
 
@@ -83,6 +90,12 @@ export function parseCsvToTransactions(csvContent: string, defaultAccountName = 
         break;
       case 'kraken':
         rawTx = parseKrakenRow(rowMap, idx, defaultAccountName);
+        break;
+      case 'coinbase':
+        rawTx = parseCoinbaseRow(rowMap, idx, defaultAccountName);
+        break;
+      case 'bitstamp':
+        rawTx = parseBitstampRow(rowMap, idx, defaultAccountName);
         break;
       case 'ledger_wallet':
         rawTx = parseLedgerWalletRow(rowMap, idx, defaultAccountName);
@@ -107,10 +120,20 @@ function getField(row: Record<string, string>, ...aliases: string[]): string {
     cleaned: k.toLowerCase().replace(/[^a-z0-9]/g, '')
   }));
 
+  // First pass: exact matches
   for (const alias of aliases) {
     const cleanAlias = alias.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const found = normalizedKeys.find((k) => k.cleaned === cleanAlias || k.cleaned.includes(cleanAlias));
-    if (found && row[found.original]) {
+    const found = normalizedKeys.find((k) => k.cleaned === cleanAlias);
+    if (found && row[found.original] !== undefined && row[found.original] !== '') {
+      return row[found.original]!;
+    }
+  }
+
+  // Second pass: prefix or substring matches
+  for (const alias of aliases) {
+    const cleanAlias = alias.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const found = normalizedKeys.find((k) => k.cleaned.startsWith(cleanAlias) || k.cleaned.endsWith(cleanAlias));
+    if (found && row[found.original] !== undefined && row[found.original] !== '') {
       return row[found.original]!;
     }
   }
@@ -121,7 +144,7 @@ function normalizeTypeHint(typeStr: string): RawTransactionType {
   const upper = typeStr.toUpperCase().trim();
   if (['BUY', 'PURCHASE', 'BUY_CRYPTO'].includes(upper)) return 'BUY';
   if (['SELL', 'SALE', 'DISPOSE'].includes(upper)) return 'SELL';
-  if (['SWAP', 'TRADE', 'EXCHANGE'].includes(upper)) return 'SWAP';
+  if (['SWAP', 'TRADE', 'CONVERT', 'EXCHANGE'].includes(upper)) return 'SWAP';
   if (['DEPOSIT', 'TRANSFER_IN', 'RECEIVE', 'IN'].includes(upper)) return 'DEPOSIT';
   if (['WITHDRAW', 'WITHDRAWAL', 'TRANSFER_OUT', 'SEND', 'OUT'].includes(upper)) return 'WITHDRAWAL';
   if (['FEE', 'COMMISSION', 'NETWORK_FEE'].includes(upper)) return 'FEE';
@@ -135,7 +158,7 @@ function parseBinanceRow(row: Record<string, string>, idx: number, fallbackAccou
 
   const operation = getField(row, 'operation', 'type').toLowerCase();
   const coin = getField(row, 'coin', 'asset').toUpperCase();
-  const changeVal = parseFloat(getField(row, 'change', 'amount') || '0');
+  const changeVal = parseCryptoNumber(getField(row, 'change', 'amount'));
   const account = getField(row, 'account') || fallbackAccount || 'Binance';
 
   let normType: RawTransactionType = 'UNKNOWN';
@@ -144,6 +167,7 @@ function parseBinanceRow(row: Record<string, string>, idx: number, fallbackAccou
   else if (operation.includes('buy') || (operation.includes('trade') && changeVal > 0)) normType = 'BUY';
   else if (operation.includes('sell') || (operation.includes('trade') && changeVal < 0)) normType = 'SELL';
   else if (operation.includes('fee')) normType = 'FEE';
+  else if (operation.includes('swap') || operation.includes('convert')) normType = 'SWAP';
 
   return {
     id: `binance-${idx}-${timestamp.getTime()}`,
@@ -169,8 +193,8 @@ function parseKrakenRow(row: Record<string, string>, idx: number, fallbackAccoun
   if (asset.startsWith('Z') && asset.length === 4) asset = asset.substring(1);
   if (asset === 'XBT') asset = 'BTC';
 
-  const amount = Math.abs(parseFloat(getField(row, 'amount') || '0'));
-  const fee = parseFloat(getField(row, 'fee') || '0');
+  const amount = Math.abs(parseCryptoNumber(getField(row, 'amount')));
+  const fee = parseCryptoNumber(getField(row, 'fee'));
   const account = fallbackAccount || 'Kraken';
 
   let normType: RawTransactionType = 'UNKNOWN';
@@ -193,6 +217,81 @@ function parseKrakenRow(row: Record<string, string>, idx: number, fallbackAccoun
   };
 }
 
+function parseCoinbaseRow(row: Record<string, string>, idx: number, fallbackAccount: string): RawTransaction | null {
+  const timeStr = getField(row, 'timestamp', 'time', 'date');
+  const timestamp = new Date(timeStr);
+  if (isNaN(timestamp.getTime())) return null;
+
+  const type = getField(row, 'transactiontype', 'type').toLowerCase();
+  const asset = getField(row, 'asset', 'currency').toUpperCase();
+  const amount = Math.abs(parseCryptoNumber(getField(row, 'quantitytransacted', 'amount')));
+  const spotPrice = parseCryptoNumber(getField(row, 'spotpriceattransaction', 'price'));
+  const totalFiat = parseCryptoNumber(getField(row, 'totalinclusiveoffees', 'total', 'subtotal'));
+  const fee = parseCryptoNumber(getField(row, 'fees', 'fee'));
+  const account = fallbackAccount || 'Coinbase';
+
+  let normType: RawTransactionType = 'UNKNOWN';
+  if (type.includes('buy')) normType = 'BUY';
+  else if (type.includes('sell')) normType = 'SELL';
+  else if (type.includes('convert') || type.includes('swap')) normType = 'SWAP';
+  else if (type.includes('send') || type.includes('withdrawal')) normType = 'WITHDRAWAL';
+  else if (type.includes('receive') || type.includes('deposit')) normType = 'DEPOSIT';
+
+  return {
+    id: `coinbase-${idx}-${timestamp.getTime()}`,
+    sourceAccount: account,
+    timestamp,
+    rawType: type,
+    normalizedType: normType,
+    asset,
+    amount,
+    spotPrice: spotPrice > 0 ? spotPrice : undefined,
+    totalFiat: totalFiat > 0 ? totalFiat : undefined,
+    fiatCurrency: 'EUR',
+    feeAmount: fee > 0 ? fee : undefined,
+    feeAsset: fee > 0 ? 'EUR' : undefined,
+    notes: getField(row, 'notes'),
+    rawRow: row
+  };
+}
+
+function parseBitstampRow(row: Record<string, string>, idx: number, fallbackAccount: string): RawTransaction | null {
+  const timeStr = getField(row, 'datetime', 'time', 'date');
+  const timestamp = new Date(timeStr);
+  if (isNaN(timestamp.getTime())) return null;
+
+  const type = getField(row, 'type').toLowerCase();
+  const account = getField(row, 'account') || fallbackAccount || 'Bitstamp';
+  const amount = Math.abs(parseCryptoNumber(getField(row, 'amount')));
+  const rate = parseCryptoNumber(getField(row, 'rate'));
+  const value = parseCryptoNumber(getField(row, 'value'));
+  const fee = parseCryptoNumber(getField(row, 'fee'));
+
+  // Detect asset from amount field or rate if string has unit
+  const asset = getField(row, 'asset') || 'BTC';
+
+  let normType: RawTransactionType = 'UNKNOWN';
+  if (type.includes('buy')) normType = 'BUY';
+  else if (type.includes('sell')) normType = 'SELL';
+  else if (type.includes('deposit')) normType = 'DEPOSIT';
+  else if (type.includes('withdrawal')) normType = 'WITHDRAWAL';
+
+  return {
+    id: `bitstamp-${idx}-${timestamp.getTime()}`,
+    sourceAccount: account,
+    timestamp,
+    rawType: type,
+    normalizedType: normType,
+    asset: asset.toUpperCase(),
+    amount,
+    spotPrice: rate > 0 ? rate : undefined,
+    totalFiat: value > 0 ? value : undefined,
+    fiatCurrency: 'EUR',
+    feeAmount: fee > 0 ? fee : undefined,
+    rawRow: row
+  };
+}
+
 function parseLedgerWalletRow(row: Record<string, string>, idx: number, fallbackAccount: string): RawTransaction | null {
   const timeStr = getField(row, 'date', 'time', 'timestamp');
   const timestamp = new Date(timeStr);
@@ -205,8 +304,8 @@ function parseLedgerWalletRow(row: Record<string, string>, idx: number, fallback
   else if (rawType.includes('fee')) normType = 'FEE';
 
   const asset = getField(row, 'asset', 'coin', 'currency').toUpperCase();
-  const amount = Math.abs(parseFloat(getField(row, 'amount') || '0'));
-  const fee = parseFloat(getField(row, 'fee') || '0');
+  const amount = Math.abs(parseCryptoNumber(getField(row, 'amount')));
+  const fee = parseCryptoNumber(getField(row, 'fee'));
   const account = fallbackAccount || 'SelfCustodyWallet';
 
   return {
@@ -239,16 +338,23 @@ function parseGenericRow(row: Record<string, string>, idx: number, fallbackAccou
   const asset = assetKey ? (row[assetKey] || '').toUpperCase() : 'UNKNOWN';
 
   const amountKey = Object.keys(row).find((k) => k.includes('amount') || k.includes('qty') || k.includes('change') || k.includes('value'));
-  const amount = amountKey ? Math.abs(parseFloat(row[amountKey] || '0')) : 0;
+  const amount = amountKey ? Math.abs(parseCryptoNumber(row[amountKey])) : 0;
 
   const feeKey = Object.keys(row).find((k) => k.includes('fee'));
-  const feeAmount = feeKey ? parseFloat(row[feeKey] || '0') : undefined;
+  const feeAmount = feeKey ? parseCryptoNumber(row[feeKey]) : undefined;
 
   const accountKey = Object.keys(row).find((k) => k.includes('account') || k.includes('source') || k.includes('wallet') || k.includes('exchange'));
   const sourceAccount = (accountKey && row[accountKey]) ? row[accountKey]! : fallbackAccount;
 
   const hashKey = Object.keys(row).find((k) => k.includes('hash') || k.includes('txid'));
   const txHash = hashKey ? row[hashKey] : undefined;
+
+  // Counter asset for direct swaps
+  const counterAssetKey = Object.keys(row).find((k) => k.includes('counterasset') || k.includes('targetcoin') || k.includes('to_asset'));
+  const counterAmountKey = Object.keys(row).find((k) => k.includes('counteramount') || k.includes('targetamount') || k.includes('to_amount'));
+
+  const spotPrice = parseCryptoNumber(getField(row, 'price', 'rate', 'spotprice'));
+  const totalFiat = parseCryptoNumber(getField(row, 'fiat', 'eur', 'usd', 'total'));
 
   return {
     id: `generic-${idx}-${timestamp.getTime()}`,
@@ -258,7 +364,11 @@ function parseGenericRow(row: Record<string, string>, idx: number, fallbackAccou
     normalizedType: normType,
     asset,
     amount,
-    feeAmount: (feeAmount && !isNaN(feeAmount) && feeAmount > 0) ? feeAmount : undefined,
+    counterAsset: counterAssetKey && row[counterAssetKey] ? row[counterAssetKey]!.toUpperCase() : undefined,
+    counterAmount: counterAmountKey && row[counterAmountKey] ? Math.abs(parseCryptoNumber(row[counterAmountKey])) : undefined,
+    spotPrice: spotPrice > 0 ? spotPrice : undefined,
+    totalFiat: totalFiat > 0 ? totalFiat : undefined,
+    feeAmount: (feeAmount && feeAmount > 0) ? feeAmount : undefined,
     feeAsset: (feeAmount && feeAmount > 0) ? asset : undefined,
     txHash,
     rawRow: row

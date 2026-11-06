@@ -66,6 +66,11 @@ node src/cli/index.ts file1.csv file2.csv --markdown --output report.md
 
 | Parametro | Descrizione | Default |
 |---|---|---|
+| `--asset <simbolo>` | Filtra i movimenti per un asset specifico (es. `BTC`, `ETH`) | tutti |
+| `--account <nome>` | Filtra i movimenti per un conto o wallet specifico | tutti |
+| `--since <data>` | Includi eventi pari o successivi a `YYYY-MM-DD` | tutti |
+| `--until <data>` | Includi eventi pari o antecedenti a `YYYY-MM-DD` | tutti |
+| `--method <metodo>` | Metodo di gestione lotti inventario: `fifo` o `lifo` | `fifo` |
 | `--window <minuti>` | Finestra temporale di tolleranza per il matching dei transfer | `180` minuti |
 | `--tolerance <percentuale>` | Tolleranza percentuale per commissioni di rete | `0.05` (5%) |
 | `--json` | Output in formato JSON strutturato | `false` |

@@ -6,9 +6,9 @@ import type {
   ReconciledMovement,
   ReconciliationOptions,
   ReconciliationReport,
-  ProvenanceNode,
-  EconomicClassification
+  ProvenanceNode
 } from './types.ts';
+import { roundToDecimals, areAmountsEqual, EPSILON } from './math.ts';
 
 interface AssetLot {
   id: string;
@@ -17,7 +17,9 @@ interface AssetLot {
   amount: number;
   acquiredAt: Date;
   originSource: string;
-  acquisitionType: 'BUY' | 'EXTERNAL_DEPOSIT' | 'INITIAL_BALANCE';
+  acquisitionType: 'BUY' | 'SWAP' | 'EXTERNAL_DEPOSIT' | 'INITIAL_BALANCE';
+  unitCostFiat?: number;
+  fiatCurrency?: string;
 }
 
 export class ReconciliationEngine {
@@ -25,9 +27,14 @@ export class ReconciliationEngine {
 
   constructor(options?: ReconciliationOptions) {
     this.options = {
-      timeWindowMinutes: options?.timeWindowMinutes ?? 180, // 3 hours window
-      feeToleranceRatio: options?.feeToleranceRatio ?? 0.05, // 5% fee tolerance
-      defaultAccount: options?.defaultAccount ?? 'DefaultWallet'
+      timeWindowMinutes: options?.timeWindowMinutes ?? 180,
+      feeToleranceRatio: options?.feeToleranceRatio ?? 0.05,
+      defaultAccount: options?.defaultAccount ?? 'DefaultWallet',
+      assetFilter: options?.assetFilter ? options.assetFilter.toUpperCase() : '',
+      accountFilter: options?.accountFilter ?? '',
+      since: options?.since ?? new Date(0),
+      until: options?.until ?? new Date(8640000000000000),
+      inventoryMethod: options?.inventoryMethod ?? 'FIFO'
     };
   }
 
@@ -41,7 +48,7 @@ export class ReconciliationEngine {
     const withdrawals = sorted.filter((t) => t.normalizedType === 'WITHDRAWAL');
     const deposits = sorted.filter((t) => t.normalizedType === 'DEPOSIT');
 
-    // Step 1: Match Internal Transfers (Withdrawal on Account A -> Deposit on Account B)
+    // Step 1: Match Internal Custody Transfers (Withdrawal on Account A -> Deposit on Account B)
     for (const w of withdrawals) {
       if (usedRawIds.has(w.id)) continue;
 
@@ -63,15 +70,14 @@ export class ReconciliationEngine {
         matchedDeposit = deposits.find((d) => {
           if (usedRawIds.has(d.id) || d.id === w.id) return false;
           if (d.asset !== w.asset) return false;
-          if (d.sourceAccount === w.sourceAccount) return false; // must be across different accounts
+          if (d.sourceAccount === w.sourceAccount) return false;
 
           const dTime = d.timestamp.getTime();
           if (dTime < minTime || dTime > maxTime) return false;
 
-          // Amount matching: deposit amount can be equal to withdrawal amount or withdrawal minus fee
-          const diff = w.amount - d.amount;
-          if (Math.abs(diff) < 0.00000001) return true; // exact match
-          if (diff > 0 && diff / w.amount <= this.options.feeToleranceRatio) return true; // net of network fee
+          const diff = roundToDecimals(w.amount - d.amount);
+          if (areAmountsEqual(w.amount, d.amount)) return true;
+          if (diff > 0 && diff / w.amount <= this.options.feeToleranceRatio) return true;
           return false;
         }) ?? null;
       }
@@ -80,7 +86,7 @@ export class ReconciliationEngine {
         usedRawIds.add(w.id);
         usedRawIds.add(matchedDeposit.id);
 
-        const feeAmount = Math.max(0, w.amount - matchedDeposit.amount + (w.feeAmount || 0));
+        const feeAmount = roundToDecimals(Math.max(0, w.amount - matchedDeposit.amount + (w.feeAmount || 0)));
 
         reconciledMovements.push({
           id: `transfer-${w.id}-${matchedDeposit.id}`,
@@ -97,24 +103,29 @@ export class ReconciliationEngine {
           txHash: w.txHash || matchedDeposit.txHash,
           provenance: [],
           requiresHumanReview: false,
-          notes: `Reconciled internal movement from ${w.sourceAccount} to ${matchedDeposit.sourceAccount}`
+          notes: `Reconciled custody transfer from ${w.sourceAccount} to ${matchedDeposit.sourceAccount}`
         });
       }
     }
 
-    // Step 2: Process remaining transactions (Buys, Sells, Fees, and Unmatched Transfers)
+    // Step 2: Process remaining transactions
     for (const tx of sorted) {
       if (usedRawIds.has(tx.id)) continue;
       usedRawIds.add(tx.id);
 
       switch (tx.normalizedType) {
         case 'BUY': {
+          const unitCost = tx.spotPrice ?? (tx.totalFiat && tx.amount > 0 ? tx.totalFiat / tx.amount : undefined);
           reconciledMovements.push({
             id: `buy-${tx.id}`,
             timestamp: tx.timestamp,
             toAccount: tx.sourceAccount,
             asset: tx.asset,
             amount: tx.amount,
+            spotPrice: tx.spotPrice,
+            totalFiat: tx.totalFiat,
+            fiatCurrency: tx.fiatCurrency || 'EUR',
+            costBasisFiat: tx.totalFiat,
             feeAsset: tx.feeAsset,
             feeAmount: tx.feeAmount,
             classification: 'ACQUISITION',
@@ -127,11 +138,13 @@ export class ReconciliationEngine {
                 acquiredAt: tx.timestamp,
                 asset: tx.asset,
                 amount: tx.amount,
-                acquisitionType: 'BUY'
+                acquisitionType: 'BUY',
+                costBasisFiat: tx.totalFiat,
+                fiatCurrency: tx.fiatCurrency || 'EUR'
               }
             ],
             requiresHumanReview: false,
-            notes: `Economic purchase of ${tx.amount} ${tx.asset} on ${tx.sourceAccount}`
+            notes: `Economic purchase of ${tx.amount} ${tx.asset} on ${tx.sourceAccount}${unitCost ? ` @ ${unitCost} EUR` : ''}`
           });
           break;
         }
@@ -143,6 +156,9 @@ export class ReconciliationEngine {
             fromAccount: tx.sourceAccount,
             asset: tx.asset,
             amount: tx.amount,
+            spotPrice: tx.spotPrice,
+            totalFiat: tx.totalFiat,
+            fiatCurrency: tx.fiatCurrency || 'EUR',
             feeAsset: tx.feeAsset,
             feeAmount: tx.feeAmount,
             classification: 'DISPOSAL',
@@ -156,8 +172,33 @@ export class ReconciliationEngine {
           break;
         }
 
+        case 'SWAP': {
+          reconciledMovements.push({
+            id: `swap-${tx.id}`,
+            timestamp: tx.timestamp,
+            fromAccount: tx.sourceAccount,
+            toAccount: tx.sourceAccount,
+            asset: tx.asset,
+            amount: tx.amount,
+            counterAsset: tx.counterAsset,
+            counterAmount: tx.counterAmount,
+            spotPrice: tx.spotPrice,
+            totalFiat: tx.totalFiat,
+            fiatCurrency: tx.fiatCurrency || 'EUR',
+            feeAsset: tx.feeAsset,
+            feeAmount: tx.feeAmount,
+            classification: 'SWAP',
+            isInternal: false,
+            sourceEventIds: [tx.id],
+            txHash: tx.txHash,
+            provenance: [],
+            requiresHumanReview: false,
+            notes: `Swap trade: ${tx.amount} ${tx.asset} -> ${tx.counterAmount || '?'} ${tx.counterAsset || '?'}`
+          });
+          break;
+        }
+
         case 'WITHDRAWAL': {
-          // Unmatched withdrawal: potentially sent to an unmonitored external wallet or spent
           reconciledMovements.push({
             id: `unmatched-withdrawal-${tx.id}`,
             timestamp: tx.timestamp,
@@ -179,7 +220,6 @@ export class ReconciliationEngine {
         }
 
         case 'DEPOSIT': {
-          // Unmatched deposit: potential external income, fiat deposit, or unlinked transfer
           reconciledMovements.push({
             id: `unmatched-deposit-${tx.id}`,
             timestamp: tx.timestamp,
@@ -198,7 +238,8 @@ export class ReconciliationEngine {
                 acquiredAt: tx.timestamp,
                 asset: tx.asset,
                 amount: tx.amount,
-                acquisitionType: 'EXTERNAL_DEPOSIT'
+                acquisitionType: 'EXTERNAL_DEPOSIT',
+                fiatCurrency: 'EUR'
               }
             ],
             requiresHumanReview: true,
@@ -244,17 +285,19 @@ export class ReconciliationEngine {
       }
     }
 
-    // Step 3: Provenance tracking and Running Balances (Lot FIFO Queue)
+    // Step 3: Provenance tracking, Lot Inventory & Balances
     reconciledMovements.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
     const activeLots: AssetLot[] = [];
     const balancesByAccount: Record<string, Record<string, number>> = {};
     const aggregatedBalances: Record<string, number> = {};
+    let totalRealizedGainLoss = 0;
+    let hasEstimatedGains = false;
 
     const updateBalance = (account: string, asset: string, delta: number) => {
       balancesByAccount[account] ??= {};
-      balancesByAccount[account][asset] = (balancesByAccount[account][asset] ?? 0) + delta;
-      aggregatedBalances[asset] = (aggregatedBalances[asset] ?? 0) + delta;
+      balancesByAccount[account][asset] = roundToDecimals((balancesByAccount[account][asset] ?? 0) + delta);
+      aggregatedBalances[asset] = roundToDecimals((aggregatedBalances[asset] ?? 0) + delta);
     };
 
     for (const mov of reconciledMovements) {
@@ -262,6 +305,7 @@ export class ReconciliationEngine {
         const toAcc = mov.toAccount ?? this.options.defaultAccount;
         updateBalance(toAcc, mov.asset, mov.amount);
 
+        const unitCost = mov.spotPrice ?? (mov.totalFiat && mov.amount > 0 ? mov.totalFiat / mov.amount : undefined);
         activeLots.push({
           id: mov.id,
           account: toAcc,
@@ -269,7 +313,9 @@ export class ReconciliationEngine {
           amount: mov.amount,
           acquiredAt: mov.timestamp,
           originSource: toAcc,
-          acquisitionType: 'BUY'
+          acquisitionType: 'BUY',
+          unitCostFiat: unitCost,
+          fiatCurrency: mov.fiatCurrency || 'EUR'
         });
       } else if (mov.classification === 'INTERNAL_MOVE') {
         const fromAcc = mov.fromAccount ?? this.options.defaultAccount;
@@ -281,63 +327,113 @@ export class ReconciliationEngine {
         }
         updateBalance(toAcc, mov.asset, mov.amount);
 
-        // Transfer lots from fromAccount to toAccount maintaining original provenance
+        // Transfer lots from fromAccount to toAccount maintaining original provenance & unit cost
         let needed = mov.amount;
         const provenanceTrail: ProvenanceNode[] = [];
 
-        for (const lot of activeLots) {
-          if (needed <= 0) break;
-          if (lot.account === fromAcc && lot.asset === mov.asset && lot.amount > 0) {
-            const transferChunk = Math.min(lot.amount, needed);
-            lot.amount -= transferChunk;
-            needed -= transferChunk;
+        // Order selection by FIFO or LIFO
+        const eligibleLots = activeLots.filter(
+          (l) => l.account === fromAcc && l.asset === mov.asset && l.amount > EPSILON
+        );
+        if (this.options.inventoryMethod === 'LIFO') {
+          eligibleLots.reverse();
+        }
 
-            provenanceTrail.push({
-              originSource: lot.originSource,
-              acquiredAt: lot.acquiredAt,
-              asset: lot.asset,
-              amount: transferChunk,
-              acquisitionType: lot.acquisitionType
-            });
+        for (const lot of eligibleLots) {
+          if (needed <= EPSILON) break;
+          const transferChunk = roundToDecimals(Math.min(lot.amount, needed));
+          lot.amount = roundToDecimals(lot.amount - transferChunk);
+          needed = roundToDecimals(needed - transferChunk);
 
-            // Create transferred lot at destination
-            activeLots.push({
-              id: `${mov.id}-transferred`,
-              account: toAcc,
-              asset: lot.asset,
-              amount: transferChunk,
-              acquiredAt: lot.acquiredAt,
-              originSource: lot.originSource,
-              acquisitionType: lot.acquisitionType
-            });
-          }
+          const nodeCost = lot.unitCostFiat ? roundToDecimals(lot.unitCostFiat * transferChunk, 2) : undefined;
+          provenanceTrail.push({
+            originSource: lot.originSource,
+            acquiredAt: lot.acquiredAt,
+            asset: lot.asset,
+            amount: transferChunk,
+            acquisitionType: lot.acquisitionType,
+            costBasisFiat: nodeCost,
+            fiatCurrency: lot.fiatCurrency
+          });
+
+          // Destination lot inherits original provenance and unit cost
+          activeLots.push({
+            id: `${mov.id}-transferred`,
+            account: toAcc,
+            asset: lot.asset,
+            amount: transferChunk,
+            acquiredAt: lot.acquiredAt,
+            originSource: lot.originSource,
+            acquisitionType: lot.acquisitionType,
+            unitCostFiat: lot.unitCostFiat,
+            fiatCurrency: lot.fiatCurrency
+          });
         }
         mov.provenance = provenanceTrail;
       } else if (mov.classification === 'DISPOSAL') {
         const fromAcc = mov.fromAccount ?? this.options.defaultAccount;
         updateBalance(fromAcc, mov.asset, -mov.amount);
 
-        // Deduct from lots
         let remainingToSell = mov.amount;
         const consumedLots: ProvenanceNode[] = [];
+        let totalCostBasisForDisposal = 0;
+        let hasCompleteCostData = true;
 
-        for (const lot of activeLots) {
-          if (remainingToSell <= 0) break;
-          if (lot.account === fromAcc && lot.asset === mov.asset && lot.amount > 0) {
-            const deduct = Math.min(lot.amount, remainingToSell);
-            lot.amount -= deduct;
-            remainingToSell -= deduct;
+        const eligibleLots = activeLots.filter(
+          (l) => l.account === fromAcc && l.asset === mov.asset && l.amount > EPSILON
+        );
+        if (this.options.inventoryMethod === 'LIFO') {
+          eligibleLots.reverse();
+        }
 
-            consumedLots.push({
-              originSource: lot.originSource,
-              acquiredAt: lot.acquiredAt,
-              asset: lot.asset,
-              amount: deduct,
-              acquisitionType: lot.acquisitionType
-            });
+        for (const lot of eligibleLots) {
+          if (remainingToSell <= EPSILON) break;
+          const deduct = roundToDecimals(Math.min(lot.amount, remainingToSell));
+          lot.amount = roundToDecimals(lot.amount - deduct);
+          remainingToSell = roundToDecimals(remainingToSell - deduct);
+
+          const chunkCost = lot.unitCostFiat !== undefined ? roundToDecimals(lot.unitCostFiat * deduct, 2) : undefined;
+          if (chunkCost !== undefined) {
+            totalCostBasisForDisposal += chunkCost;
+          } else {
+            hasCompleteCostData = false;
           }
+
+          consumedLots.push({
+            originSource: lot.originSource,
+            acquiredAt: lot.acquiredAt,
+            asset: lot.asset,
+            amount: deduct,
+            acquisitionType: lot.acquisitionType,
+            costBasisFiat: chunkCost,
+            fiatCurrency: lot.fiatCurrency
+          });
         }
         mov.provenance = consumedLots;
+
+        if (hasCompleteCostData && (mov.totalFiat || mov.spotPrice)) {
+          const proceeds = mov.totalFiat ?? roundToDecimals(mov.amount * (mov.spotPrice || 0), 2);
+          mov.costBasisFiat = roundToDecimals(totalCostBasisForDisposal, 2);
+          mov.gainLossFiat = roundToDecimals(proceeds - totalCostBasisForDisposal, 2);
+          totalRealizedGainLoss = roundToDecimals(totalRealizedGainLoss + mov.gainLossFiat, 2);
+          hasEstimatedGains = true;
+        }
+      } else if (mov.classification === 'SWAP') {
+        const fromAcc = mov.fromAccount ?? this.options.defaultAccount;
+        updateBalance(fromAcc, mov.asset, -mov.amount);
+        if (mov.counterAsset && mov.counterAmount) {
+          updateBalance(fromAcc, mov.counterAsset, mov.counterAmount);
+          activeLots.push({
+            id: `${mov.id}-swap-recv`,
+            account: fromAcc,
+            asset: mov.counterAsset,
+            amount: mov.counterAmount,
+            acquiredAt: mov.timestamp,
+            originSource: fromAcc,
+            acquisitionType: 'SWAP',
+            fiatCurrency: mov.fiatCurrency || 'EUR'
+          });
+        }
       } else if (mov.classification === 'FEE_EXPENSE') {
         const fromAcc = mov.fromAccount ?? this.options.defaultAccount;
         updateBalance(fromAcc, mov.asset, -mov.amount);
@@ -350,23 +446,23 @@ export class ReconciliationEngine {
       }
     }
 
-    // Clean zero-balances floating point errors
-    for (const acc of Object.keys(balancesByAccount)) {
-      const accBalances = balancesByAccount[acc];
-      if (!accBalances) continue;
-      for (const asset of Object.keys(accBalances)) {
-        if (Math.abs(accBalances[asset] ?? 0) < 0.000000001) {
-          accBalances[asset] = 0;
-        }
-      }
+    // Step 4: Apply filters (Asset, Account, Date Window)
+    let filteredMovements = reconciledMovements;
+
+    if (this.options.assetFilter) {
+      filteredMovements = filteredMovements.filter((m) => m.asset === this.options.assetFilter || m.counterAsset === this.options.assetFilter);
     }
-    for (const asset of Object.keys(aggregatedBalances)) {
-      if (Math.abs(aggregatedBalances[asset] ?? 0) < 0.000000001) {
-        aggregatedBalances[asset] = 0;
-      }
+    if (this.options.accountFilter) {
+      filteredMovements = filteredMovements.filter((m) => m.fromAccount === this.options.accountFilter || m.toAccount === this.options.accountFilter);
+    }
+    if (this.options.since.getTime() > 0) {
+      filteredMovements = filteredMovements.filter((m) => m.timestamp.getTime() >= this.options.since.getTime());
+    }
+    if (this.options.until.getTime() < 8640000000000000) {
+      filteredMovements = filteredMovements.filter((m) => m.timestamp.getTime() <= this.options.until.getTime());
     }
 
-    const unresolvedIssues = reconciledMovements
+    const unresolvedIssues = filteredMovements
       .filter((m) => m.requiresHumanReview)
       .map((m) => ({
         eventId: m.id,
@@ -382,16 +478,22 @@ export class ReconciliationEngine {
       generatedAt: new Date().toISOString(),
       sourceFiles: sourceFileNames,
       totalRawEvents: transactions.length,
-      totalReconciledMovements: reconciledMovements.length,
-      internalTransfersCount: reconciledMovements.filter((m) => m.isInternal).length,
-      economicTransactionsCount: reconciledMovements.filter((m) => ['ACQUISITION', 'DISPOSAL'].includes(m.classification)).length,
+      totalReconciledMovements: filteredMovements.length,
+      internalTransfersCount: filteredMovements.filter((m) => m.isInternal).length,
+      economicTransactionsCount: filteredMovements.filter((m) => ['ACQUISITION', 'DISPOSAL'].includes(m.classification)).length,
+      swapsCount: filteredMovements.filter((m) => m.classification === 'SWAP').length,
       requiresReviewCount: unresolvedIssues.length,
+      realizedGainLoss: {
+        totalFiat: totalRealizedGainLoss,
+        fiatCurrency: 'EUR',
+        hasEstimatedGains
+      },
       balances: {
         byAccount: balancesByAccount,
         aggregated: aggregatedBalances
       },
       unresolvedIssues,
-      movements: reconciledMovements
+      movements: filteredMovements
     };
   }
 }

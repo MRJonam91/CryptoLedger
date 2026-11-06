@@ -114,6 +114,11 @@ node src/cli/index.ts file1.csv file2.csv --markdown --output report.md
 
 | Flag | Description | Default |
 |---|---|---|
+| `--asset <symbol>` | Filter movements for a specific asset (e.g. `BTC`, `ETH`) | all |
+| `--account <name>` | Filter movements involving a specific account or wallet | all |
+| `--since <date>` | Include events on or after `YYYY-MM-DD` | all |
+| `--until <date>` | Include events on or before `YYYY-MM-DD` | all |
+| `--method <method>` | Inventory lot method: `fifo` or `lifo` | `fifo` |
 | `--window <minutes>` | Reconciliation time window tolerance | `180` minutes |
 | `--tolerance <pct>` | Network fee discrepancy ratio tolerance | `0.05` (5%) |
 | `--json` | Print structured JSON report | `false` |

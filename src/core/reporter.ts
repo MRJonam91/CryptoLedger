@@ -5,11 +5,11 @@ import type { ReconciliationReport } from './types.ts';
 
 export function formatTerminalReport(report: ReconciliationReport): string {
   const lines: string[] = [];
-  const divider = '─'.repeat(65);
+  const divider = '─'.repeat(70);
 
-  lines.push('\n' + '═'.repeat(65));
-  lines.push('  CryptoLedger — Reconciliation & Provenance Report');
-  lines.push('═'.repeat(65));
+  lines.push('\n' + '═'.repeat(70));
+  lines.push('  CryptoLedger — Reconciliation & Provenance Report (Alpha)');
+  lines.push('═'.repeat(70));
   lines.push(`  Generated: ${report.generatedAt}`);
   if (report.sourceFiles.length > 0) {
     lines.push(`  Sources:   ${report.sourceFiles.join(', ')}`);
@@ -19,9 +19,17 @@ export function formatTerminalReport(report: ReconciliationReport): string {
   lines.push('\n📊 SUMMARY');
   lines.push(`  • Raw Events Processed:        ${report.totalRawEvents}`);
   lines.push(`  • Reconciled Movements:        ${report.totalReconciledMovements}`);
-  lines.push(`  • Internal Transfers Matched:  ${report.internalTransfersCount} (non-economic custody moves)`);
+  lines.push(`  • Internal Transfers Matched:  ${report.internalTransfersCount} (custody moves, non-taxable)`);
   lines.push(`  • Economic Trades (Buy/Sell):  ${report.economicTransactionsCount}`);
+  lines.push(`  • Crypto Swaps / Conversions:  ${report.swapsCount}`);
   lines.push(`  • Pending Human Reviews:       ${report.requiresReviewCount}`);
+
+  if (report.realizedGainLoss.hasEstimatedGains) {
+    const glSign = report.realizedGainLoss.totalFiat >= 0 ? '+' : '';
+    lines.push('\n📈 ESTIMATED REALIZED GAIN / LOSS (Informational)');
+    lines.push(`  • Total Estimated P&L:         ${glSign}${report.realizedGainLoss.totalFiat.toFixed(2)} ${report.realizedGainLoss.fiatCurrency}`);
+    lines.push('  ↳ Note: Informational estimate based on FIFO lots. Not a certified tax statement.');
+  }
 
   lines.push('\n💰 ACCOUNT BALANCES');
   for (const [account, assets] of Object.entries(report.balances.byAccount)) {
@@ -40,15 +48,27 @@ export function formatTerminalReport(report: ReconciliationReport): string {
     }
   }
 
-  lines.push('\n🔄 RECONCILED MOVEMENTS (Sample & Chronology)');
+  lines.push('\n🔄 RECONCILED MOVEMENTS (Chronological Trail)');
   report.movements.forEach((m, idx) => {
     const timeStr = m.timestamp.toISOString().replace('T', ' ').substring(0, 19);
     const tag = m.isInternal ? '[INTERNAL MOVE]' : `[${m.classification}]`;
     const fromStr = m.fromAccount ?? 'EXTERNAL';
     const toStr = m.toAccount ?? 'EXTERNAL';
-    lines.push(`  ${(idx + 1).toString().padStart(2)}. ${timeStr} ${tag.padEnd(16)} ${m.amount} ${m.asset} (${fromStr} -> ${toStr})`);
+    let detail = `${m.amount} ${m.asset}`;
+    if (m.classification === 'SWAP' && m.counterAsset) {
+      detail += ` -> ${m.counterAmount} ${m.counterAsset}`;
+    }
+    lines.push(`  ${(idx + 1).toString().padStart(2)}. ${timeStr} ${tag.padEnd(16)} ${detail} (${fromStr} -> ${toStr})`);
+
+    if (m.costBasisFiat !== undefined && m.gainLossFiat !== undefined) {
+      const gl = m.gainLossFiat >= 0 ? `+${m.gainLossFiat.toFixed(2)}` : m.gainLossFiat.toFixed(2);
+      lines.push(`      ↳ Cost Basis: ${m.costBasisFiat.toFixed(2)} EUR | Realized P&L: ${gl} EUR`);
+    }
     if (m.provenance.length > 0) {
-      const origins = m.provenance.map((p) => `${p.originSource} on ${p.acquiredAt.toISOString().substring(0, 10)}`).join(', ');
+      const origins = m.provenance.map((p) => {
+        const costStr = p.costBasisFiat ? ` (${p.costBasisFiat} EUR)` : '';
+        return `${p.originSource} on ${p.acquiredAt.toISOString().substring(0, 10)}${costStr}`;
+      }).join(', ');
       lines.push(`      ↳ Provenance: ${origins}`);
     }
     if (m.requiresHumanReview) {
@@ -73,7 +93,7 @@ export function formatTerminalReport(report: ReconciliationReport): string {
 export function formatMarkdownReport(report: ReconciliationReport): string {
   const lines: string[] = [];
 
-  lines.push('# CryptoLedger — Reconciliation & Provenance Report');
+  lines.push('# CryptoLedger — Reconciliation & Provenance Report (Alpha)');
   lines.push('');
   lines.push(`- **Generated at:** ${report.generatedAt}`);
   lines.push(`- **Sources:** ${report.sourceFiles.map((s) => `\`${s}\``).join(', ')}`);
@@ -84,9 +104,14 @@ export function formatMarkdownReport(report: ReconciliationReport): string {
   lines.push('|---|---|');
   lines.push(`| Raw Events Processed | ${report.totalRawEvents} |`);
   lines.push(`| Reconciled Movements | ${report.totalReconciledMovements} |`);
-  lines.push(`| Internal Transfers Matched | ${report.internalTransfersCount} |`);
+  lines.push(`| Internal Custody Moves | ${report.internalTransfersCount} |`);
   lines.push(`| Economic Trades | ${report.economicTransactionsCount} |`);
+  lines.push(`| Swaps / Conversions | ${report.swapsCount} |`);
   lines.push(`| Pending Reviews | ${report.requiresReviewCount} |`);
+  if (report.realizedGainLoss.hasEstimatedGains) {
+    const glSign = report.realizedGainLoss.totalFiat >= 0 ? '+' : '';
+    lines.push(`| Estimated Realized P&L | ${glSign}${report.realizedGainLoss.totalFiat.toFixed(2)} ${report.realizedGainLoss.fiatCurrency} |`);
+  }
   lines.push('');
 
   lines.push('## Account Balances');
