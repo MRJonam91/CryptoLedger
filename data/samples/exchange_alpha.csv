@@ -1,0 +1,5 @@
+UTC_Time,Account,Operation,Coin,Change,Remark
+2026-01-10 10:00:00,ExchangeAlpha,Buy,BTC,0.25000000,Bought BTC with EUR
+2026-01-10 10:05:00,ExchangeAlpha,Buy,ETH,2.50000000,Bought ETH with EUR
+2026-01-15 14:30:00,ExchangeAlpha,Withdraw,BTC,-0.20000000,Withdrawal to hardware wallet (fee: 0.0005 BTC)
+2026-01-20 09:00:00,ExchangeAlpha,Sell,ETH,-1.00000000,Sold 1.0 ETH for EUR
