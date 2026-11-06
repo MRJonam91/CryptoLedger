@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-11-06
+
+### Fixed
+- Fixed ESM `__dirname` resolution in `cryptoledger demo` ensuring zero-config demo executes from any working directory or via `npx`.
+- Fixed Byte Order Mark (`\uFEFF`) handling in CSV header parsing for Excel-generated exports.
+
+### Added
+- Multi-format date parsing (`parseCryptoDate`) supporting European formats (`DD/MM/YYYY`, `DD.MM.YYYY`), ISO 8601, and Unix seconds/milliseconds.
+- Extended crypto decimal arithmetic to 12 decimal places (`CRYPTO_PRECISION_DECIMALS`) for high-precision gas and micro-fee accounting.
+- Instant client-side text filtering in the standalone HTML report dashboard without external dependencies.
+- Added test coverage for BOM parsing and European/Unix date ingestion (17 tests total).
+
 ## [1.0.0] - 2026-11-06
 
 ### Added

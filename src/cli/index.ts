@@ -5,6 +5,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { parseCsvToTransactions } from '../core/csv.ts';
 import { ReconciliationEngine } from '../core/reconciler.ts';
 import { formatTerminalReport, formatMarkdownReport } from '../core/reporter.ts';
@@ -12,7 +13,25 @@ import { exportToReconciledCsv } from '../export/csv_export.ts';
 import { exportToHtmlReport } from '../export/html_export.ts';
 import type { RawTransaction } from '../core/types.ts';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const SPONSOR_LINE = '💡 Support open source crypto tooling: github.com/sponsors/MRJonam91 | ko-fi.com/mrjonam | paypal.me/manorollo';
+
+function resolveSampleFile(filename: string): string {
+  // Check cwd first
+  const cwdPath = path.resolve(process.cwd(), 'data/samples', filename);
+  if (fs.existsSync(cwdPath)) return cwdPath;
+
+  // Check relative to src/cli or dist/cli
+  const devPath = path.resolve(__dirname, '../../data/samples', filename);
+  if (fs.existsSync(devPath)) return devPath;
+
+  const distPath = path.resolve(__dirname, '../data/samples', filename);
+  if (fs.existsSync(distPath)) return distPath;
+
+  return cwdPath;
+}
 
 function printHelp(): void {
   console.log(`
@@ -68,10 +87,10 @@ async function main(): Promise<void> {
 
   if (args[0] === 'demo') {
     args = [
-      path.resolve(__dirname, '../../data/samples/exchange_alpha.csv'),
-      path.resolve(__dirname, '../../data/samples/wallet_ledger.csv'),
-      path.resolve(__dirname, '../../data/samples/exchange_coinbase.csv'),
-      path.resolve(__dirname, '../../data/samples/exchange_bitstamp.csv')
+      resolveSampleFile('exchange_alpha.csv'),
+      resolveSampleFile('wallet_ledger.csv'),
+      resolveSampleFile('exchange_coinbase.csv'),
+      resolveSampleFile('exchange_bitstamp.csv')
     ];
   } else if (args[0] === 'audit') {
     isAuditSubcommand = true;

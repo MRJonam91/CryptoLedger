@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Manoj Rollo <fbxmano@gmail.com> (https://github.com/MRJonam91)
 
 import type { RawTransaction, RawTransactionType } from './types.ts';
-import { parseCryptoNumber } from './math.ts';
+import { parseCryptoNumber, parseCryptoDate } from './math.ts';
 
 export type DetectedFormat = 'binance' | 'kraken' | 'coinbase' | 'bitstamp' | 'ledger_wallet' | 'generic';
 
@@ -12,10 +12,11 @@ export interface CsvParseResult {
 }
 
 /**
- * Robust zero-dependency CSV line parser handling quotes, escaped quotes, and delimiters.
+ * Robust zero-dependency CSV line parser handling quotes, escaped quotes, delimiters, and BOM.
  */
 export function parseCsvRows(content: string): string[][] {
-  const lines = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const cleaned = content.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = cleaned.split('\n');
   const rows: string[][] = [];
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
@@ -129,7 +130,7 @@ function getField(row: Record<string, string>, ...aliases: string[]): string {
     }
   }
 
-  // Second pass: prefix or substring matches
+  // Second pass: prefix or suffix matches
   for (const alias of aliases) {
     const cleanAlias = alias.toLowerCase().replace(/[^a-z0-9]/g, '');
     const found = normalizedKeys.find((k) => k.cleaned.startsWith(cleanAlias) || k.cleaned.endsWith(cleanAlias));
@@ -153,8 +154,8 @@ function normalizeTypeHint(typeStr: string): RawTransactionType {
 
 function parseBinanceRow(row: Record<string, string>, idx: number, fallbackAccount: string): RawTransaction | null {
   const timeStr = getField(row, 'utc_time', 'utctime', 'date_utc', 'dateutc', 'time', 'date');
-  const timestamp = new Date(timeStr);
-  if (isNaN(timestamp.getTime())) return null;
+  const timestamp = parseCryptoDate(timeStr);
+  if (!timestamp) return null;
 
   const operation = getField(row, 'operation', 'type').toLowerCase();
   const coin = getField(row, 'coin', 'asset').toUpperCase();
@@ -184,8 +185,8 @@ function parseBinanceRow(row: Record<string, string>, idx: number, fallbackAccou
 
 function parseKrakenRow(row: Record<string, string>, idx: number, fallbackAccount: string): RawTransaction | null {
   const timeStr = getField(row, 'time', 'date');
-  const timestamp = new Date(timeStr);
-  if (isNaN(timestamp.getTime())) return null;
+  const timestamp = parseCryptoDate(timeStr);
+  if (!timestamp) return null;
 
   const type = getField(row, 'type').toLowerCase();
   let asset = getField(row, 'asset', 'coin').toUpperCase();
@@ -219,8 +220,8 @@ function parseKrakenRow(row: Record<string, string>, idx: number, fallbackAccoun
 
 function parseCoinbaseRow(row: Record<string, string>, idx: number, fallbackAccount: string): RawTransaction | null {
   const timeStr = getField(row, 'timestamp', 'time', 'date');
-  const timestamp = new Date(timeStr);
-  if (isNaN(timestamp.getTime())) return null;
+  const timestamp = parseCryptoDate(timeStr);
+  if (!timestamp) return null;
 
   const type = getField(row, 'transactiontype', 'type').toLowerCase();
   const asset = getField(row, 'asset', 'currency').toUpperCase();
@@ -257,8 +258,8 @@ function parseCoinbaseRow(row: Record<string, string>, idx: number, fallbackAcco
 
 function parseBitstampRow(row: Record<string, string>, idx: number, fallbackAccount: string): RawTransaction | null {
   const timeStr = getField(row, 'datetime', 'time', 'date');
-  const timestamp = new Date(timeStr);
-  if (isNaN(timestamp.getTime())) return null;
+  const timestamp = parseCryptoDate(timeStr);
+  if (!timestamp) return null;
 
   const type = getField(row, 'type').toLowerCase();
   const account = getField(row, 'account') || fallbackAccount || 'Bitstamp';
@@ -267,7 +268,6 @@ function parseBitstampRow(row: Record<string, string>, idx: number, fallbackAcco
   const value = parseCryptoNumber(getField(row, 'value'));
   const fee = parseCryptoNumber(getField(row, 'fee'));
 
-  // Detect asset from amount field or rate if string has unit
   const asset = getField(row, 'asset') || 'BTC';
 
   let normType: RawTransactionType = 'UNKNOWN';
@@ -294,8 +294,8 @@ function parseBitstampRow(row: Record<string, string>, idx: number, fallbackAcco
 
 function parseLedgerWalletRow(row: Record<string, string>, idx: number, fallbackAccount: string): RawTransaction | null {
   const timeStr = getField(row, 'date', 'time', 'timestamp');
-  const timestamp = new Date(timeStr);
-  if (isNaN(timestamp.getTime())) return null;
+  const timestamp = parseCryptoDate(timeStr);
+  if (!timestamp) return null;
 
   const rawType = getField(row, 'type', 'operation').toLowerCase();
   let normType: RawTransactionType = 'UNKNOWN';
@@ -327,8 +327,8 @@ function parseLedgerWalletRow(row: Record<string, string>, idx: number, fallback
 function parseGenericRow(row: Record<string, string>, idx: number, fallbackAccount: string): RawTransaction | null {
   const timeKey = Object.keys(row).find((k) => k.includes('time') || k.includes('date'));
   if (!timeKey) return null;
-  const timestamp = new Date(row[timeKey] || '');
-  if (isNaN(timestamp.getTime())) return null;
+  const timestamp = parseCryptoDate(row[timeKey]);
+  if (!timestamp) return null;
 
   const typeKey = Object.keys(row).find((k) => k.includes('type') || k.includes('op'));
   const rawType = typeKey ? row[typeKey] || '' : '';
@@ -349,7 +349,6 @@ function parseGenericRow(row: Record<string, string>, idx: number, fallbackAccou
   const hashKey = Object.keys(row).find((k) => k.includes('hash') || k.includes('txid'));
   const txHash = hashKey ? row[hashKey] : undefined;
 
-  // Counter asset for direct swaps
   const counterAssetKey = Object.keys(row).find((k) => k.includes('counterasset') || k.includes('targetcoin') || k.includes('to_asset'));
   const counterAmountKey = Object.keys(row).find((k) => k.includes('counteramount') || k.includes('targetamount') || k.includes('to_amount'));
 

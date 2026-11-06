@@ -13,6 +13,13 @@ test('parseCsvRows parses comma and semicolon separated rows with quotes', () =>
   assert.equal(rows[1]?.[2], 'Bought BTC, with EUR');
 });
 
+test('parseCsvRows handles UTF-8 Byte Order Mark (BOM)', () => {
+  const bomInput = `\uFEFFDate,Type,Amount\n2026-01-01,Buy,1.5`;
+  const rows = parseCsvRows(bomInput);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0]?.[0], 'Date');
+});
+
 test('parseCsvToTransactions autodetects Binance and Ledger formats', () => {
   const binanceCsv = `UTC_Time,Account,Operation,Coin,Change,Remark\n2026-01-10 10:00:00,Binance,Buy,BTC,0.25,Bought BTC`;
   const resultBinance = parseCsvToTransactions(binanceCsv, 'Binance');

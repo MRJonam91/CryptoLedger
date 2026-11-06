@@ -1,6 +1,6 @@
 {
   "name": "cryptoledger",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Local-first cryptocurrency transaction reconciler: reconstruct movements between exchanges and wallets, reconcile internal transfers with provenance, and isolate economic transactions with zero third-party leakage.",
   "type": "module",
   "license": "Apache-2.0",

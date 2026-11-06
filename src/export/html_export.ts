@@ -16,7 +16,7 @@ export function exportToHtmlReport(report: ReconciliationReport): string {
         ? `<span class="badge-review" title="${m.reviewReason || ''}">⚠️ Action Required</span>`
         : '<span class="badge-ok">✓ Reconciled</span>';
 
-      return `<tr>
+      return `<tr data-asset="${m.asset}" data-type="${m.classification}">
         <td>${idx + 1}</td>
         <td><code>${timeStr}</code></td>
         <td><span class="badge ${tagClass}">${m.isInternal ? 'INTERNAL MOVE' : m.classification}</span></td>
@@ -43,6 +43,7 @@ export function exportToHtmlReport(report: ReconciliationReport): string {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CryptoLedger — Reconciliation & Provenance Report</title>
   <style>
     :root {
@@ -68,10 +69,15 @@ export function exportToHtmlReport(report: ReconciliationReport): string {
       border-bottom: 1px solid var(--border);
       padding-bottom: 1rem;
       margin-bottom: 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 1rem;
     }
     .summary-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 1rem;
       margin-bottom: 2rem;
     }
@@ -85,6 +91,23 @@ export function exportToHtmlReport(report: ReconciliationReport): string {
       font-size: 1.75rem;
       font-weight: 700;
       color: var(--primary);
+    }
+    .search-bar {
+      margin-bottom: 1rem;
+      display: flex;
+      gap: 1rem;
+    }
+    .search-input {
+      flex: 1;
+      padding: 0.75rem 1rem;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      font-size: 0.95rem;
+    }
+    .search-input:focus {
+      outline: 2px solid var(--primary);
     }
     .badge {
       display: inline-block;
@@ -133,8 +156,10 @@ export function exportToHtmlReport(report: ReconciliationReport): string {
 </head>
 <body>
   <div class="header">
-    <h1>🛡️ CryptoLedger — Reconciliation & Provenance Report</h1>
-    <p class="text-muted">Generated: ${report.generatedAt} | Sources: ${report.sourceFiles.join(', ')}</p>
+    <div>
+      <h1>🛡️ CryptoLedger — Reconciliation & Provenance Report</h1>
+      <p class="text-muted">Generated: ${report.generatedAt} | Sources: ${report.sourceFiles.join(', ')}</p>
+    </div>
   </div>
 
   <div class="summary-grid">
@@ -170,7 +195,11 @@ export function exportToHtmlReport(report: ReconciliationReport): string {
   </div>
 
   <h2>🔄 Reconciled Chronological Movements</h2>
-  <table>
+  <div class="search-bar">
+    <input type="text" id="searchInput" class="search-input" placeholder="🔍 Instant search movements (filter by asset, account, type, or date)..." onkeyup="filterMovements()">
+  </div>
+
+  <table id="movementsTable">
     <thead>
       <tr>
         <th>#</th>
@@ -191,6 +220,19 @@ export function exportToHtmlReport(report: ReconciliationReport): string {
   <footer class="text-muted text-small">
     CryptoLedger Local-First Reconciler • Apache-2.0 • Zero third-party telemetry or cloud leaks.
   </footer>
+
+  <script>
+    function filterMovements() {
+      const input = document.getElementById('searchInput');
+      const filter = input.value.toLowerCase();
+      const rows = document.querySelectorAll('#movementsTable tbody tr');
+
+      rows.forEach(row => {
+        const text = row.innerText.toLowerCase();
+        row.style.display = text.includes(filter) ? '' : 'none';
+      });
+    }
+  </script>
 </body>
 </html>`;
 }
