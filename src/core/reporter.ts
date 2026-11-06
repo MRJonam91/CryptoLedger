@@ -8,7 +8,7 @@ export function formatTerminalReport(report: ReconciliationReport): string {
   const divider = '─'.repeat(70);
 
   lines.push('\n' + '═'.repeat(70));
-  lines.push('  CryptoLedger — Reconciliation & Provenance Report (Alpha)');
+  lines.push('  CryptoLedger — Reconciliation & Provenance Report (Beta)');
   lines.push('═'.repeat(70));
   lines.push(`  Generated: ${report.generatedAt}`);
   if (report.sourceFiles.length > 0) {
@@ -22,13 +22,14 @@ export function formatTerminalReport(report: ReconciliationReport): string {
   lines.push(`  • Internal Transfers Matched:  ${report.internalTransfersCount} (custody moves, non-taxable)`);
   lines.push(`  • Economic Trades (Buy/Sell):  ${report.economicTransactionsCount}`);
   lines.push(`  • Crypto Swaps / Conversions:  ${report.swapsCount}`);
+  lines.push(`  • Detected Anomalies:          ${report.anomalies.length}`);
   lines.push(`  • Pending Human Reviews:       ${report.requiresReviewCount}`);
 
   if (report.realizedGainLoss.hasEstimatedGains) {
     const glSign = report.realizedGainLoss.totalFiat >= 0 ? '+' : '';
     lines.push('\n📈 ESTIMATED REALIZED GAIN / LOSS (Informational)');
     lines.push(`  • Total Estimated P&L:         ${glSign}${report.realizedGainLoss.totalFiat.toFixed(2)} ${report.realizedGainLoss.fiatCurrency}`);
-    lines.push('  ↳ Note: Informational estimate based on FIFO lots. Not a certified tax statement.');
+    lines.push('  ↳ Note: Informational estimate based on lot method. Not a certified tax statement.');
   }
 
   lines.push('\n💰 ACCOUNT BALANCES');
@@ -76,14 +77,22 @@ export function formatTerminalReport(report: ReconciliationReport): string {
     }
   });
 
+  if (report.anomalies.length > 0) {
+    lines.push('\n🔍 AUDIT & ANOMALY DIAGNOSTICS');
+    report.anomalies.forEach((a, idx) => {
+      const icon = a.severity === 'critical' ? '🚨 CRITICAL' : a.severity === 'warning' ? '⚠️  WARNING' : 'ℹ️  INFO';
+      lines.push(`  [${idx + 1}] ${icon}: [${a.type}] ${a.message}`);
+    });
+  }
+
   if (report.unresolvedIssues.length > 0) {
     lines.push('\n⚠️  ACTION REQUIRED: HUMAN REVIEW');
     report.unresolvedIssues.forEach((issue, idx) => {
       lines.push(`  [${idx + 1}] Account: ${issue.account} | ${issue.amount} ${issue.asset} at ${issue.timestamp}`);
       lines.push(`      Reason: ${issue.reason}`);
     });
-  } else {
-    lines.push('\n✅ All transfers matched and reconciled with 100% provenance integrity.');
+  } else if (report.anomalies.length === 0) {
+    lines.push('\n✅ All transfers matched and verified with zero detected anomalies.');
   }
 
   lines.push('\n' + divider);
@@ -93,7 +102,7 @@ export function formatTerminalReport(report: ReconciliationReport): string {
 export function formatMarkdownReport(report: ReconciliationReport): string {
   const lines: string[] = [];
 
-  lines.push('# CryptoLedger — Reconciliation & Provenance Report (Alpha)');
+  lines.push('# CryptoLedger — Reconciliation & Provenance Report (Beta)');
   lines.push('');
   lines.push(`- **Generated at:** ${report.generatedAt}`);
   lines.push(`- **Sources:** ${report.sourceFiles.map((s) => `\`${s}\``).join(', ')}`);
@@ -107,12 +116,24 @@ export function formatMarkdownReport(report: ReconciliationReport): string {
   lines.push(`| Internal Custody Moves | ${report.internalTransfersCount} |`);
   lines.push(`| Economic Trades | ${report.economicTransactionsCount} |`);
   lines.push(`| Swaps / Conversions | ${report.swapsCount} |`);
+  lines.push(`| Detected Anomalies | ${report.anomalies.length} |`);
   lines.push(`| Pending Reviews | ${report.requiresReviewCount} |`);
   if (report.realizedGainLoss.hasEstimatedGains) {
     const glSign = report.realizedGainLoss.totalFiat >= 0 ? '+' : '';
     lines.push(`| Estimated Realized P&L | ${glSign}${report.realizedGainLoss.totalFiat.toFixed(2)} ${report.realizedGainLoss.fiatCurrency} |`);
   }
   lines.push('');
+
+  if (report.anomalies.length > 0) {
+    lines.push('## Diagnostic Anomalies');
+    lines.push('');
+    lines.push('| Severity | Type | Message | Account | Timestamp |');
+    lines.push('|---|---|---|---|---|');
+    report.anomalies.forEach((a) => {
+      lines.push(`| ${a.severity.toUpperCase()} | ${a.type} | ${a.message} | ${a.account || '-'} | ${a.timestamp || '-'} |`);
+    });
+    lines.push('');
+  }
 
   lines.push('## Account Balances');
   lines.push('');

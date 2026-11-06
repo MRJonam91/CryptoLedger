@@ -6,7 +6,8 @@ import type {
   ReconciledMovement,
   ReconciliationOptions,
   ReconciliationReport,
-  ProvenanceNode
+  ProvenanceNode,
+  LedgerAnomaly
 } from './types.ts';
 import { roundToDecimals, areAmountsEqual, EPSILON } from './math.ts';
 
@@ -39,6 +40,61 @@ export class ReconciliationEngine {
   }
 
   public reconcile(transactions: RawTransaction[], sourceFileNames: string[] = []): ReconciliationReport {
+    const anomalies: LedgerAnomaly[] = [];
+
+    // Check for duplicate raw transactions
+    const seenHashes = new Map<string, string>();
+    const seenSignatures = new Map<string, string>();
+
+    for (const tx of transactions) {
+      if (tx.txHash && tx.txHash.length > 8) {
+        if (seenHashes.has(tx.txHash)) {
+          anomalies.push({
+            type: 'DUPLICATE_TX',
+            severity: 'warning',
+            message: `Possible duplicate transaction hash detected: ${tx.txHash}`,
+            account: tx.sourceAccount,
+            asset: tx.asset,
+            timestamp: tx.timestamp.toISOString(),
+            relatedEventIds: [seenHashes.get(tx.txHash)!, tx.id]
+          });
+        } else {
+          seenHashes.set(tx.txHash, tx.id);
+        }
+      }
+
+      const sig = `${tx.sourceAccount}-${tx.asset}-${tx.amount}-${tx.normalizedType}-${tx.timestamp.getTime()}`;
+      if (seenSignatures.has(sig)) {
+        anomalies.push({
+          type: 'DUPLICATE_TX',
+          severity: 'warning',
+          message: `Identical transaction signature detected on ${tx.sourceAccount} for ${tx.amount} ${tx.asset}`,
+          account: tx.sourceAccount,
+          asset: tx.asset,
+          timestamp: tx.timestamp.toISOString(),
+          relatedEventIds: [seenSignatures.get(sig)!, tx.id]
+        });
+      } else {
+        seenSignatures.set(sig, tx.id);
+      }
+
+      // Check for high fee ratio
+      if (tx.feeAmount && tx.amount > 0 && tx.feeAsset === tx.asset) {
+        const feeRatio = tx.feeAmount / tx.amount;
+        if (feeRatio > 0.5) {
+          anomalies.push({
+            type: 'HIGH_FEE_RATIO',
+            severity: 'warning',
+            message: `Disproportionate fee detected: ${tx.feeAmount} ${tx.feeAsset} on a ${tx.amount} ${tx.asset} transaction (${(feeRatio * 100).toFixed(1)}%)`,
+            account: tx.sourceAccount,
+            asset: tx.asset,
+            timestamp: tx.timestamp.toISOString(),
+            relatedEventIds: [tx.id]
+          });
+        }
+      }
+    }
+
     // Sort transactions chronologically
     const sorted = [...transactions].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
@@ -48,24 +104,24 @@ export class ReconciliationEngine {
     const withdrawals = sorted.filter((t) => t.normalizedType === 'WITHDRAWAL');
     const deposits = sorted.filter((t) => t.normalizedType === 'DEPOSIT');
 
-    // Step 1: Match Internal Custody Transfers (Withdrawal on Account A -> Deposit on Account B)
+    // Step 1: Match Internal Custody Transfers
     for (const w of withdrawals) {
       if (usedRawIds.has(w.id)) continue;
 
       let matchedDeposit: RawTransaction | null = null;
 
-      // 1.1 Match by transaction hash if available
+      // 1.1 Match by transaction hash
       if (w.txHash) {
         matchedDeposit = deposits.find(
           (d) => !usedRawIds.has(d.id) && d.id !== w.id && d.asset === w.asset && d.txHash === w.txHash
         ) ?? null;
       }
 
-      // 1.2 Match by time window and amounts if not matched by hash
+      // 1.2 Match by time window and net amounts
       if (!matchedDeposit) {
         const wTime = w.timestamp.getTime();
         const maxTime = wTime + this.options.timeWindowMinutes * 60 * 1000;
-        const minTime = wTime - 15 * 60 * 1000; // allow small clock drift
+        const minTime = wTime - 15 * 60 * 1000;
 
         matchedDeposit = deposits.find((d) => {
           if (usedRawIds.has(d.id) || d.id === w.id) return false;
@@ -213,7 +269,7 @@ export class ReconciliationEngine {
             txHash: tx.txHash,
             provenance: [],
             requiresHumanReview: true,
-            reviewReason: `Withdrawal of ${tx.amount} ${tx.asset} from ${tx.sourceAccount} not matched with any internal deposit. Requires manual tagging (external payment or third-party transfer).`,
+            reviewReason: `Withdrawal of ${tx.amount} ${tx.asset} from ${tx.sourceAccount} not matched with any internal deposit. Requires manual tagging.`,
             notes: 'Unmatched withdrawal'
           });
           break;
@@ -243,7 +299,7 @@ export class ReconciliationEngine {
               }
             ],
             requiresHumanReview: true,
-            reviewReason: `Deposit of ${tx.amount} ${tx.asset} into ${tx.sourceAccount} has no matching internal withdrawal. Requires manual confirmation of origin.`,
+            reviewReason: `Deposit of ${tx.amount} ${tx.asset} into ${tx.sourceAccount} has no matching internal withdrawal. Requires manual confirmation.`,
             notes: 'Unmatched deposit'
           });
           break;
@@ -294,16 +350,30 @@ export class ReconciliationEngine {
     let totalRealizedGainLoss = 0;
     let hasEstimatedGains = false;
 
-    const updateBalance = (account: string, asset: string, delta: number) => {
+    const updateBalance = (account: string, asset: string, delta: number, movId: string, timestamp: Date) => {
       balancesByAccount[account] ??= {};
-      balancesByAccount[account][asset] = roundToDecimals((balancesByAccount[account][asset] ?? 0) + delta);
+      const newBal = roundToDecimals((balancesByAccount[account][asset] ?? 0) + delta);
+      balancesByAccount[account][asset] = newBal;
       aggregatedBalances[asset] = roundToDecimals((aggregatedBalances[asset] ?? 0) + delta);
+
+      // Check negative balance anomaly
+      if (newBal < -EPSILON) {
+        anomalies.push({
+          type: 'NEGATIVE_BALANCE',
+          severity: 'critical',
+          message: `Negative balance (${newBal} ${asset}) detected on account "${account}". Preceding deposits may be missing or unimported.`,
+          account,
+          asset,
+          timestamp: timestamp.toISOString(),
+          relatedEventIds: [movId]
+        });
+      }
     };
 
     for (const mov of reconciledMovements) {
       if (mov.classification === 'ACQUISITION') {
         const toAcc = mov.toAccount ?? this.options.defaultAccount;
-        updateBalance(toAcc, mov.asset, mov.amount);
+        updateBalance(toAcc, mov.asset, mov.amount, mov.id, mov.timestamp);
 
         const unitCost = mov.spotPrice ?? (mov.totalFiat && mov.amount > 0 ? mov.totalFiat / mov.amount : undefined);
         activeLots.push({
@@ -321,22 +391,24 @@ export class ReconciliationEngine {
         const fromAcc = mov.fromAccount ?? this.options.defaultAccount;
         const toAcc = mov.toAccount ?? this.options.defaultAccount;
 
-        updateBalance(fromAcc, mov.asset, -mov.amount);
+        updateBalance(fromAcc, mov.asset, -mov.amount, mov.id, mov.timestamp);
         if (mov.feeAmount && mov.feeAsset) {
-          updateBalance(fromAcc, mov.feeAsset, -mov.feeAmount);
+          updateBalance(fromAcc, mov.feeAsset, -mov.feeAmount, mov.id, mov.timestamp);
         }
-        updateBalance(toAcc, mov.asset, mov.amount);
+        updateBalance(toAcc, mov.asset, mov.amount, mov.id, mov.timestamp);
 
-        // Transfer lots from fromAccount to toAccount maintaining original provenance & unit cost
+        // Transfer lots from fromAccount to toAccount
         let needed = mov.amount;
         const provenanceTrail: ProvenanceNode[] = [];
 
-        // Order selection by FIFO or LIFO
-        const eligibleLots = activeLots.filter(
+        // Order selection by FIFO, LIFO, or HIFO
+        let eligibleLots = activeLots.filter(
           (l) => l.account === fromAcc && l.asset === mov.asset && l.amount > EPSILON
         );
         if (this.options.inventoryMethod === 'LIFO') {
-          eligibleLots.reverse();
+          eligibleLots = [...eligibleLots].reverse();
+        } else if (this.options.inventoryMethod === 'HIFO') {
+          eligibleLots = [...eligibleLots].sort((a, b) => (b.unitCostFiat ?? 0) - (a.unitCostFiat ?? 0));
         }
 
         for (const lot of eligibleLots) {
@@ -356,7 +428,6 @@ export class ReconciliationEngine {
             fiatCurrency: lot.fiatCurrency
           });
 
-          // Destination lot inherits original provenance and unit cost
           activeLots.push({
             id: `${mov.id}-transferred`,
             account: toAcc,
@@ -372,18 +443,20 @@ export class ReconciliationEngine {
         mov.provenance = provenanceTrail;
       } else if (mov.classification === 'DISPOSAL') {
         const fromAcc = mov.fromAccount ?? this.options.defaultAccount;
-        updateBalance(fromAcc, mov.asset, -mov.amount);
+        updateBalance(fromAcc, mov.asset, -mov.amount, mov.id, mov.timestamp);
 
         let remainingToSell = mov.amount;
         const consumedLots: ProvenanceNode[] = [];
         let totalCostBasisForDisposal = 0;
         let hasCompleteCostData = true;
 
-        const eligibleLots = activeLots.filter(
+        let eligibleLots = activeLots.filter(
           (l) => l.account === fromAcc && l.asset === mov.asset && l.amount > EPSILON
         );
         if (this.options.inventoryMethod === 'LIFO') {
-          eligibleLots.reverse();
+          eligibleLots = [...eligibleLots].reverse();
+        } else if (this.options.inventoryMethod === 'HIFO') {
+          eligibleLots = [...eligibleLots].sort((a, b) => (b.unitCostFiat ?? 0) - (a.unitCostFiat ?? 0));
         }
 
         for (const lot of eligibleLots) {
@@ -420,9 +493,9 @@ export class ReconciliationEngine {
         }
       } else if (mov.classification === 'SWAP') {
         const fromAcc = mov.fromAccount ?? this.options.defaultAccount;
-        updateBalance(fromAcc, mov.asset, -mov.amount);
+        updateBalance(fromAcc, mov.asset, -mov.amount, mov.id, mov.timestamp);
         if (mov.counterAsset && mov.counterAmount) {
-          updateBalance(fromAcc, mov.counterAsset, mov.counterAmount);
+          updateBalance(fromAcc, mov.counterAsset, mov.counterAmount, mov.id, mov.timestamp);
           activeLots.push({
             id: `${mov.id}-swap-recv`,
             account: fromAcc,
@@ -436,17 +509,17 @@ export class ReconciliationEngine {
         }
       } else if (mov.classification === 'FEE_EXPENSE') {
         const fromAcc = mov.fromAccount ?? this.options.defaultAccount;
-        updateBalance(fromAcc, mov.asset, -mov.amount);
+        updateBalance(fromAcc, mov.asset, -mov.amount, mov.id, mov.timestamp);
       } else if (mov.requiresHumanReview) {
         if (mov.fromAccount) {
-          updateBalance(mov.fromAccount, mov.asset, -mov.amount);
+          updateBalance(mov.fromAccount, mov.asset, -mov.amount, mov.id, mov.timestamp);
         } else if (mov.toAccount) {
-          updateBalance(mov.toAccount, mov.asset, mov.amount);
+          updateBalance(mov.toAccount, mov.asset, mov.amount, mov.id, mov.timestamp);
         }
       }
     }
 
-    // Step 4: Apply filters (Asset, Account, Date Window)
+    // Step 4: Apply filters
     let filteredMovements = reconciledMovements;
 
     if (this.options.assetFilter) {
@@ -492,6 +565,7 @@ export class ReconciliationEngine {
         byAccount: balancesByAccount,
         aggregated: aggregatedBalances
       },
+      anomalies,
       unresolvedIssues,
       movements: filteredMovements
     };

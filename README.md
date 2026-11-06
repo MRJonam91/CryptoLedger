@@ -53,11 +53,17 @@ npm run demo
 # Terminal formatted overview
 node src/cli/index.ts exchange_binance.csv wallet_ledger.csv
 
+# Generate an interactive standalone HTML report
+node src/cli/index.ts file1.csv file2.csv --html report.html
+
+# Export a clean universal CSV ledger
+node src/cli/index.ts file1.csv file2.csv --export-csv reconciled.csv
+
 # Output structured JSON for downstream tax or audit tools
 node src/cli/index.ts file1.csv file2.csv --json
 
-# Export clean Markdown summary
-node src/cli/index.ts file1.csv file2.csv --markdown --output report.md
+# Run in strict mode with HIFO lot valuation
+node src/cli/index.ts file1.csv file2.csv --method hifo --strict
 ```
 
 ---
@@ -118,9 +124,12 @@ node src/cli/index.ts file1.csv file2.csv --markdown --output report.md
 | `--account <name>` | Filter movements involving a specific account or wallet | all |
 | `--since <date>` | Include events on or after `YYYY-MM-DD` | all |
 | `--until <date>` | Include events on or before `YYYY-MM-DD` | all |
-| `--method <method>` | Inventory lot method: `fifo` or `lifo` | `fifo` |
+| `--method <method>` | Inventory lot valuation method: `fifo`, `lifo`, or `hifo` | `fifo` |
 | `--window <minutes>` | Reconciliation time window tolerance | `180` minutes |
 | `--tolerance <pct>` | Network fee discrepancy ratio tolerance | `0.05` (5%) |
+| `--export-csv <file>` | Export reconciled movements to unified CSV ledger | — |
+| `--html <file>` | Generate standalone interactive HTML report | — |
+| `--strict` | Exit with error code 1 if critical anomalies or unresolved reviews occur | `false` |
 | `--json` | Print structured JSON report | `false` |
 | `--markdown` | Format report as GitHub-flavored Markdown | `false` |
 | `--output <file>` | Write report directly to file | `stdout` |

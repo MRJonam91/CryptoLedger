@@ -26,6 +26,8 @@ flowchart TD
         Term["Formatted Terminal Output"]
         JSON["Structured JSON (Tax & Audit Pipeline)"]
         MD["Markdown Table Report"]
+        CSVExp["Unified Reconciled CSV (src/export/csv_export.ts)"]
+        HTMLExp["Standalone Interactive HTML Dashboard (src/export/html_export.ts)"]
     end
 
     Inputs --> Norm
@@ -38,6 +40,8 @@ flowchart TD
     Gate --> Term
     Gate --> JSON
     Gate --> MD
+    Gate --> CSVExp
+    Gate --> HTMLExp
 ```
 
 ## Core Modules & Boundaries

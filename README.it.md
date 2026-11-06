@@ -53,11 +53,17 @@ npm run demo
 # Riepilogo formattato nel terminale
 node src/cli/index.ts exchange_binance.csv wallet_ledger.csv
 
+# Genera un report HTML interattivo standalone
+node src/cli/index.ts file1.csv file2.csv --html report.html
+
+# Esporta un ledger CSV universale riconciliato
+node src/cli/index.ts file1.csv file2.csv --export-csv riconciliato.csv
+
 # Output in JSON strutturato per software contabili o script
 node src/cli/index.ts file1.csv file2.csv --json
 
-# Export in formato Markdown
-node src/cli/index.ts file1.csv file2.csv --markdown --output report.md
+# Esegui in modalità rigida con metodo HIFO
+node src/cli/index.ts file1.csv file2.csv --method hifo --strict
 ```
 
 ---
@@ -70,9 +76,12 @@ node src/cli/index.ts file1.csv file2.csv --markdown --output report.md
 | `--account <nome>` | Filtra i movimenti per un conto o wallet specifico | tutti |
 | `--since <data>` | Includi eventi pari o successivi a `YYYY-MM-DD` | tutti |
 | `--until <data>` | Includi eventi pari o antecedenti a `YYYY-MM-DD` | tutti |
-| `--method <metodo>` | Metodo di gestione lotti inventario: `fifo` o `lifo` | `fifo` |
+| `--method <metodo>` | Metodo di gestione lotti: `fifo`, `lifo`, o `hifo` | `fifo` |
 | `--window <minuti>` | Finestra temporale di tolleranza per il matching dei transfer | `180` minuti |
 | `--tolerance <percentuale>` | Tolleranza percentuale per commissioni di rete | `0.05` (5%) |
+| `--export-csv <file>` | Esporta i movimenti riconciliati in un CSV unificato | — |
+| `--html <file>` | Genera report grafico HTML interattivo standalone | — |
+| `--strict` | Esce con codice di errore 1 se presenti anomalie critiche | `false` |
 | `--json` | Output in formato JSON strutturato | `false` |
 | `--markdown` | Output in tabella Markdown | `false` |
 | `--output <file>` | Salva il report su file anziché stdout | `stdout` |

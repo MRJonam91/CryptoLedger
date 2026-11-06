@@ -7,3 +7,5 @@ export * from './core/math.ts';
 export * from './core/csv.ts';
 export * from './core/reconciler.ts';
 export * from './core/reporter.ts';
+export * from './export/csv_export.ts';
+export * from './export/html_export.ts';

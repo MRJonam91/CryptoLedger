@@ -83,6 +83,23 @@ export interface AccountBalance {
   balance: number;
 }
 
+export type AnomalyType =
+  | 'NEGATIVE_BALANCE'
+  | 'DUPLICATE_TX'
+  | 'HIGH_FEE_RATIO'
+  | 'CLOCK_SKEW'
+  | 'CUSTODY_GAP';
+
+export interface LedgerAnomaly {
+  type: AnomalyType;
+  severity: 'critical' | 'warning' | 'info';
+  message: string;
+  account?: string;
+  asset?: string;
+  timestamp?: string;
+  relatedEventIds?: string[];
+}
+
 export interface ReconciliationOptions {
   /** Time window tolerance in minutes to match withdrawals and deposits (default: 180 min) */
   timeWindowMinutes?: number;
@@ -99,7 +116,7 @@ export interface ReconciliationOptions {
   /** Filter movements occurring on or before this date */
   until?: Date;
   /** Inventory valuation method for cost basis and provenance (default: FIFO) */
-  inventoryMethod?: 'FIFO' | 'LIFO';
+  inventoryMethod?: 'FIFO' | 'LIFO' | 'HIFO';
 }
 
 export interface ReconciliationReport {
@@ -120,6 +137,7 @@ export interface ReconciliationReport {
     byAccount: Record<string, Record<string, number>>;
     aggregated: Record<string, number>;
   };
+  anomalies: LedgerAnomaly[];
   unresolvedIssues: Array<{
     eventId: string;
     account: string;

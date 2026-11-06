@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-beta] - 2026-11-06
+
+### Added
+- **Diagnostic Anomaly Engine**: Automatic real-time audit flagging:
+  - Critical **Negative Balances** (untracked outflows exceeding known deposits).
+  - **Duplicate Transaction Hashes & Signatures** preventing double counting from re-imports.
+  - **High Fee Ratio Warnings** (>50% transfer fee anomaly detection).
+- **HIFO Inventory Valuation**: Added Highest-In, First-Out (`--method hifo`) lot matching to minimize taxable gains alongside FIFO and LIFO.
+- **Universal Reconciled CSV Export (`--export-csv <file>`)**: Clean tabular ledger with custody classification, normalized amounts, fee netting, and provenance.
+- **Standalone Interactive HTML Dashboard (`--html <file>`)**: Local-only, zero-dependency visual report with account balance grids, color-coded status badges, and expandable audit rows.
+- **Strict Pipeline Mode (`--strict`)**: Non-zero exit code for CI/CD or automated verification scripts if critical anomalies or unresolved reviews exist.
+- **Expanded Test Suite**: 15 comprehensive unit and integration tests passing natively.
+
 ## [0.2.0-alpha] - 2026-11-06
 
 ### Added
