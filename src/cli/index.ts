@@ -16,11 +16,12 @@ const SPONSOR_LINE = '💡 Support open source crypto tooling: github.com/sponso
 
 function printHelp(): void {
   console.log(`
-CryptoLedger — Local-first cryptocurrency movements reconciler (Beta v0.3.0)
+CryptoLedger — Local-first cryptocurrency movements reconciler (v1.0.0)
 
-USAGE:
-  cryptoledger <file1.csv> <file2.csv> [options]
-  npx cryptoledger data/samples/exchange_alpha.csv data/samples/wallet_ledger.csv
+COMMANDS:
+  cryptoledger <file1.csv> <file2.csv> ... [options]   Reconcile transactions across CSVs
+  cryptoledger audit <file1.csv> <file2.csv> ...       Run anomaly and balance integrity audit
+  cryptoledger demo                                    Run on bundled multi-exchange sample data
 
 FILTERING & VALUATION OPTIONS:
   --asset <symbol>        Filter movements for a specific asset (e.g. BTC, ETH)
@@ -50,16 +51,33 @@ SPONSORSHIP:
 }
 
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
+  const rawArgs = process.argv.slice(2);
 
-  if (args.length === 0 || args.includes('-h') || args.includes('--help')) {
+  if (rawArgs.length === 0 || rawArgs.includes('-h') || rawArgs.includes('--help')) {
     printHelp();
     return;
   }
 
-  if (args.includes('-v') || args.includes('--version')) {
-    console.log('cryptoledger v0.3.0-beta');
+  if (rawArgs.includes('-v') || rawArgs.includes('--version')) {
+    console.log('cryptoledger v1.0.0');
     return;
+  }
+
+  let args = [...rawArgs];
+  let isAuditSubcommand = false;
+
+  if (args[0] === 'demo') {
+    args = [
+      path.resolve(__dirname, '../../data/samples/exchange_alpha.csv'),
+      path.resolve(__dirname, '../../data/samples/wallet_ledger.csv'),
+      path.resolve(__dirname, '../../data/samples/exchange_coinbase.csv'),
+      path.resolve(__dirname, '../../data/samples/exchange_bitstamp.csv')
+    ];
+  } else if (args[0] === 'audit') {
+    isAuditSubcommand = true;
+    args = args.slice(1);
+  } else if (args[0] === 'reconcile') {
+    args = args.slice(1);
   }
 
   const files: string[] = [];
@@ -67,7 +85,7 @@ async function main(): Promise<void> {
   let feeToleranceRatio = 0.05;
   let isJson = false;
   let isMarkdown = false;
-  let isStrict = false;
+  let isStrict = isAuditSubcommand;
   let outputPath: string | null = null;
   let exportCsvPath: string | null = null;
   let htmlPath: string | null = null;
@@ -187,7 +205,7 @@ async function main(): Promise<void> {
     console.log(`\n${SPONSOR_LINE}\n`);
   }
 
-  // Strict check
+  // Strict audit check
   if (isStrict) {
     const criticalAnomalies = report.anomalies.filter((a) => a.severity === 'critical');
     if (criticalAnomalies.length > 0 || report.requiresReviewCount > 0) {

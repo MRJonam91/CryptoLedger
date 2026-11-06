@@ -1,9 +1,10 @@
-# CryptoLedger — Local-First Cryptocurrency Movement Reconciler
+# CryptoLedger — Local-First Cryptocurrency Movement Reconciler (v1.0)
 
-[Italiano](README.it.md) • [English](README.md) • [Licensing](LICENSING.md) • [Contributing](CONTRIBUTING.md)
+[Italiano](README.it.md) • [English](README.md) • [Licensing](LICENSING.md) • [Architecture](docs/ARCHITECTURE.md) • [Contributing](CONTRIBUTING.md)
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/MRJonam91/CryptoLedger/actions/workflows/ci.yml/badge.svg)](https://github.com/MRJonam91/CryptoLedger/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](package.json)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen)](package.json)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-success)](package.json)
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-MRJonam91-ea4aaa?logo=githubsponsors)](https://github.com/sponsors/MRJonam91)

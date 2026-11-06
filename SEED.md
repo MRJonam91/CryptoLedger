@@ -1,12 +1,26 @@
-# CryptoLedger: decision seed / punto di partenza
+# CryptoLedger — Execution Plan & Roadmap
 
-IT — Scopo: Movimenti tra exchange e wallet sono difficili da ricostruire. Prima prova: Import locale di due CSV fittizi e riconciliazione di buy, sell e transfer con provenienza.
+## 1. Problem & Verified Initial Slice (v1.0.0 Completed)
 
-EN — Purpose: Movements between exchanges and wallets are hard to reconstruct. First trial: Local import of two fictional CSVs and reconciliation of buys, sells and transfers with provenance.
+- **Problem**: Movements between exchanges and self-custody wallets are notoriously hard to reconstruct, leading to misclassified internal transfers, lost acquisition provenance, and financial privacy leaks on third-party cloud services.
+- **First Verifiable Slice (Achieved)**:
+  - Multi-exchange local CSV ingestion (Binance, Kraken, Coinbase, Bitstamp, Ledger, Generic).
+  - Deterministic internal transfer matching (custody moves net of fees).
+  - Economic vs non-taxable classification (`ACQUISITION`, `DISPOSAL`, `SWAP`, `INTERNAL_MOVE`, `FEE_EXPENSE`).
+  - Provenance lot tracking preserving acquisition origin timestamps and cost basis across multi-hop custody chains.
+  - Interactive standalone HTML report, universal CSV ledger export, and terminal dashboard.
+  - Audit engine detecting negative balances, duplicates, and fee ratio anomalies.
 
-## Decisioni da prendere / Decisions to make
+## 2. Boundaries & Invariants
 
-- Scegliere un utente pilota e un caso reale autorizzato. / Choose a pilot user and one authorized real case.
-- Confermare nome, confini e relazione con i progetti esistenti prima di scrivere codice. / Confirm name, boundaries and relation to existing projects before coding.
-- Definire una misura di successo osservabile per la prima prova. / Define one observable success measure for the first trial.
-- Applicare `../_repo-kit/REPO-STANDARDS.md` se diventa un repository MRJonam91; decidere licenza, attribuzioni e materiali di terzi allora. / Apply `../_repo-kit/REPO-STANDARDS.md` if this becomes an MRJonam91 repository; decide licensing, attribution and third-party assets then.
+- **Zero Third-Party Telemetry**: 100% offline, local-first execution.
+- **Read-Only**: Zero wallet write access, zero private key interaction, zero blockchain execution.
+- **Tax Boundaries**: Informational cost basis and lot calculation (FIFO/LIFO/HIFO); does not provide certified legal/tax advice.
+- **Core Guard**: Core reconciler kept strictly under 1,500 LOC for maximum auditability.
+
+## 3. Future Roadmap (v1.1+)
+
+- [ ] On-chain transaction explorer integration via public RPC for automatic hash enrichment.
+- [ ] Direct export to Form 8949 / Quadro RT tax templates.
+- [ ] WebAssembly / Browser sandbox bundle for client-side local drag & drop.
+- [ ] Extended DEX & LP liquidity pool token accounting (Uniswap v2/v3, Curve).

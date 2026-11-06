@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-11-06
+
+### Added
+- **Production v1.0.0 Release**: Official production-ready milestone for local-first crypto reconciliation.
+- **Dedicated Subcommands**: Integrated `cryptoledger <files...>`, `cryptoledger audit <files...>`, and `cryptoledger demo`.
+- **Complete Multi-Exchange Support**: Ingestion for Binance, Kraken, Coinbase Pro, Bitstamp, Ledger, and generic CSV formats.
+- **Auditing & Anomaly Engine**: Detects negative account balances, duplicate hashes, and high fee discrepancies.
+- **Comprehensive Lot Management**: Full support for FIFO, LIFO, and HIFO inventory methods with cost basis retention.
+- **Universal Exports**: Interactive standalone HTML dashboard, unified CSV ledger, and structured JSON.
+- **Dual-Language Documentation**: Full bilingual documentation, architecture specs, and MIT/Apache-2.0 open source standards.
+
 ## [0.3.0-beta] - 2026-11-06
 
 ### Added

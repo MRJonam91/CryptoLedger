@@ -8,7 +8,7 @@ export function formatTerminalReport(report: ReconciliationReport): string {
   const divider = '─'.repeat(70);
 
   lines.push('\n' + '═'.repeat(70));
-  lines.push('  CryptoLedger — Reconciliation & Provenance Report (Beta)');
+  lines.push('  CryptoLedger — Reconciliation & Provenance Report (v1.0.0)');
   lines.push('═'.repeat(70));
   lines.push(`  Generated: ${report.generatedAt}`);
   if (report.sourceFiles.length > 0) {
@@ -102,7 +102,7 @@ export function formatTerminalReport(report: ReconciliationReport): string {
 export function formatMarkdownReport(report: ReconciliationReport): string {
   const lines: string[] = [];
 
-  lines.push('# CryptoLedger — Reconciliation & Provenance Report (Beta)');
+  lines.push('# CryptoLedger — Reconciliation & Provenance Report (v1.0.0)');
   lines.push('');
   lines.push(`- **Generated at:** ${report.generatedAt}`);
   lines.push(`- **Sources:** ${report.sourceFiles.map((s) => `\`${s}\``).join(', ')}`);
